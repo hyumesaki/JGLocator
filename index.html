@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JPEG GeoLocator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        #result {
+            margin-top: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+        }
+        button {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        @media (max-width: 600px) {
+            button {
+                width: 100%;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>JPEG GeoLocator</h1>
+    <input type="file" id="fileInput" accept=".jpg, .jpeg">
+    <div id="result"></div>
+    <button id="copyButton" style="display: none;">クリップボードにコピー</button>
+    <button id="tweetButton" style="display: none;">[X]</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.js"></script>
+    <script>
+        document.getElementById('fileInput').addEventListener('change', async function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const exifData = await getExifData(file);
+                if (exifData) {
+                    const { latitude, longitude } = exifData;
+                    const address = await getAddress(latitude, longitude);
+                    const weather = await getWeather(latitude, longitude);
+                    const mapUrl = generateMapUrl(latitude, longitude);
+                    displayResult(address, weather, mapUrl);
+                    document.getElementById('copyButton').focus();
+                } else {
+                    displayResult("経緯度情報が見つかりませんでした。", "");
+                }
+            }
+        });
+
+        function getExifData(file) {
+            return new Promise((resolve, reject) => {
+                EXIF.getData(file, function() {
+                    const lat = EXIF.getTag(this, "GPSLatitude");
+                    const lon = EXIF.getTag(this, "GPSLongitude");
+                    const latRef = EXIF.getTag(this, "GPSLatitudeRef") || "N";
+                    const lonRef = EXIF.getTag(this, "GPSLongitudeRef") || "W";
+
+                    if (!lat || !lon) {
+                        resolve(null);
+                        return;
+                    }
+
+                    const latitude = convertDMSToDD(lat, latRef);
+                    const longitude = convertDMSToDD(lon, lonRef);
+                    resolve({ latitude, longitude });
+                });
+            });
+        }
+
+        function convertDMSToDD(dms, ref) {
+            const degrees = dms[0] + dms[1] / 60 + dms[2] / 3600;
+            return (ref === "S" || ref === "W") ? degrees * -1 : degrees;
+        }
+
+        async function getAddress(latitude, longitude) {
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`);
+            const data = await response.json();
+            const { state, city, town, village, suburb } = data.address;
+            const location = [state, city, town, village, suburb].filter(Boolean).join(' ');
+            return location;
+        }
+
+        async function getWeather(latitude, longitude) {
+            const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&timezone=Asia/Tokyo`);
+            const data = await response.json();
+            const weather = data.current_weather;
+            const weatherText = `${translateWeatherCode(weather.weathercode)},気温${weather.temperature}℃`;
+            return weatherText;
+        }
+
+        function translateWeatherCode(code) {
+            const weatherCodes = {
+                0: '快晴',
+                1: '晴れ',
+                2: '部分的に曇り',
+                3: '曇り',
+                45: '霧',
+                48: '霧',
+                51: '霧雨',
+                53: '霧雨',
+                55: '霧雨',
+                56: '霧雨',
+                57: '霧雨',
+                61: 'にわか雨',
+                63: 'にわか雨',
+                65: 'にわか雨',
+                66: 'にわか雨',
+                67: 'にわか雨',
+                71: '雪',
+                73: '雪',
+                75: '雪',
+                77: '雪',
+                80: 'にわか雨',
+                81: 'にわか雨',
+                82: 'にわか雨',
+                85: 'にわか雪',
+                86: 'にわか雪',
+                95: '雷雨',
+                96: '雷雨',
+                99: '雷雨'
+            };
+            return weatherCodes[code] || '不明';
+        }
+
+        function generateMapUrl(latitude, longitude) {
+            return `https://www.google.com/maps?q=${latitude},${longitude}`;
+        }
+
+        function displayResult(address, weather, mapUrl) {
+            const resultDiv = document.getElementById('result');
+            const text = `${address}だよ\n${weather}\n${mapUrl}\nJGロケータから投稿\n#JGLocator`;
+            resultDiv.innerHTML = `
+                <p>取得した住所:</p>
+                <textarea readonly id="resultText">${text}</textarea>
+            `;
+            const copyButton = document.getElementById('copyButton');
+            const tweetButton = document.getElementById('tweetButton');
+            copyButton.style.display = 'block';
+            tweetButton.style.display = 'block';
+            copyButton.onclick = () => {
+                const resultText = document.getElementById('resultText');
+                resultText.select();
+                document.execCommand('copy');
+                alert('コピーしました!');
+            };
+            tweetButton.onclick = () => {
+                const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+                window.open(tweetUrl, '_blank');
+            };
+        }
+    </script>
+</body>
+</html>
